@@ -426,6 +426,7 @@ int runner_launch(RUNNER runner) {
     }
 
     if(pid == 0) {
+        
         // install signal handlers for this process
         signal(SIGPIPE, SIG_IGN);                       
         signal(SIGCHLD, sigchld_handler);        
@@ -478,7 +479,8 @@ int runner_launch(RUNNER runner) {
             
             if (child_pid == 0) {
                 // redirect standard output and input to /dev/null -> prevent output from cluttering terminal
-                int dev_null_fd = open("/dev/null", O_WRONLY);
+                //int dev_null_fd = open("/dev/null", O_WRONLY);
+                int dev_null_fd = open("/dev/null", O_RDWR);
                 if (dev_null_fd != -1) {
                     dup2(dev_null_fd, STDOUT_FILENO);
                     dup2(dev_null_fd, STDIN_FILENO);
@@ -492,6 +494,7 @@ int runner_launch(RUNNER runner) {
                 close(runner->shm_fd);
                 
                 //build argument vector with @@ replaced by input
+                /*
                 extern char **args;
                 extern size_t program_argc;
 
@@ -511,11 +514,35 @@ int runner_launch(RUNNER runner) {
                     }
                 }
                 argv[argc] = NULL;
+                */
+
+                extern char **args;
+                extern size_t program_argc;
                 
-                // log before execution
+                // build argv
+                int argc_count = 0;
+                for (size_t i = 0; i < program_argc; i++) {
+                    argc_count++;
+                }
+                
+                char **argv = malloc(sizeof(char*) * (argc_count + 1));
+                if (argv == NULL) {
+                    free(input_buffer);
+                    exit(EXIT_FAILURE);
+                }
+                
+                size_t argc = 0;
+                for (size_t i = 0; i < program_argc; i++) {
+                    if (strcmp(args[i], PROGRAM_ARGUMENT_PLACEHOLDER) == 0) {
+                        argv[argc++] = input_buffer;
+                    } else {
+                        argv[argc++] = args[i];
+                    }
+                }
+                argv[argc] = NULL;
+                
+                // log before execution + execute
                 fzl_runner_launch(runner->id, argv, NULL);
-                
-                // execute target program 
                 execvp(argv[0], argv);
                 
                 // only if execution fails
@@ -531,7 +558,7 @@ int runner_launch(RUNNER runner) {
                 sigprocmask(SIG_BLOCK, &mask, &oldmask);
         
                 // set alarm to enforce timeout -> SIGALRM sgignal sent if run out of time
-                int timeout = 5;
+                extern int timeout;
                 alarm(timeout);
                 
                 // wait for child to exit/timeout -> use sigsuspend()
