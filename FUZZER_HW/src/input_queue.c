@@ -1,3 +1,4 @@
+#include "input.h"
 #include "input_queue.h"
 
 // implement queue_node, queue, input_queue structs
@@ -38,7 +39,7 @@ INPUT_QUEUE input_queue_init() {
     queue->dequeue_counter = 0;
     
     // return after initialization is complete
-    return queue
+    return queue;
 }
 
 void input_queue_fini(INPUT_QUEUE queue) {
@@ -48,7 +49,7 @@ void input_queue_fini(INPUT_QUEUE queue) {
     }
 
     // free high priority queue -> include all nodes + their inputs
-    QUEUE_NODE *h_node = queue->high_priority_head;
+    QUEUE_NODE *h_node = queue->high_priority.head;
     while(h_node != NULL) {
         QUEUE_NODE *next = h_node->next;
         free_input(h_node->input);
@@ -57,7 +58,7 @@ void input_queue_fini(INPUT_QUEUE queue) {
     }
 
     // free low priority queue -> include all nodes + their inputs
-    QUEUE_NODE *l_node = queue->low_priority_head;
+    QUEUE_NODE *l_node = queue->low_priority.head;
     while(l_node != NULL) {
         QUEUE_NODE *next = l_node->next;
         free_input(l_node->input);
