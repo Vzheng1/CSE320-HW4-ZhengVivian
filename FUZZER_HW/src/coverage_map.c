@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include <string.h>
 #include "coverage_map.h"
 #include "global.h"
 
@@ -14,13 +16,13 @@ struct coverage_map {
     size_t bitmap_bytes;
     HASH_NODE **hashset;
     size_t hash_size;
-}
+};
 
 #define HASHSET_SIZE 1024
 
 COVERAGE_MAP coverage_map_init() {
     // allocate memory for entire coverage_map component
-    COVERAGE_MAP map = malloc(sizeof(struct map));
+    COVERAGE_MAP map = malloc(sizeof(struct coverage_map));
     if(map == NULL) {
         return NULL;
     }
@@ -36,11 +38,11 @@ COVERAGE_MAP coverage_map_init() {
     // initialize hashset -> allocate memory for all nodes, size = max input length?
     map->hashset = calloc(HASHSET_SIZE, sizeof(HASH_NODE *));
     if(map->hashset == NULL) {
-        free(ap->bitmap);
+        free(map->bitmap);
         free(map);
         return NULL;
     }
-    map->hashset_size = HASHSET_SIZE;
+    map->hash_size = HASHSET_SIZE;
 
     return map;
 }
@@ -52,7 +54,7 @@ void coverage_map_fini(COVERAGE_MAP map) {
     }
 
     // iterate through entire hashset to free nodes
-    for(size_t i = 0; i < map->hashset_size; i++) {
+    for(size_t i = 0; i < map->hash_size; i++) {
         HASH_NODE *current = map->hashset[i];
 
         while(current != NULL) {
@@ -81,7 +83,7 @@ static unsigned long hash_data(const char *data, size_t len) {
 COVERAGE_PRIORITY coverage_map_add(COVERAGE_MAP map, char *cov_data) {
     // invalid inputs
     if(map == NULL || cov_data == NULL) {
-        return NULL;
+        return COV_NO_PRIO;
     }
 
     // check for HIGH priority FIRST
@@ -131,7 +133,7 @@ COVERAGE_PRIORITY coverage_map_add(COVERAGE_MAP map, char *cov_data) {
     // if run into error in any case, return no priority (-1)
     HASH_NODE *new_node = malloc(sizeof(HASH_NODE));
     if(new_node == NULL) {
-        return COB_NO_PRIO;
+        return COV_NO_PRIO;
     }
 
     new_node->data = malloc(cov_len);

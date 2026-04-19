@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include <string.h>
 #include "input.h"
 #include "input_queue.h"
 
