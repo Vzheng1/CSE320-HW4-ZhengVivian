@@ -64,7 +64,7 @@ RUNNER runner_init() {
     // the pipe that the main process reads from -> status pipe
     // end should be set as nonblocking using the O_NONBLOCK flag in the fcntl system call.
     //      allows main process to check for results without blocking
-    if(fcntl(runner->status_pipe[0], F_SETFL, 0) == -1) {
+    if(fcntl(runner->status_pipe[0], F_SETFL, O_NONBLOCK) == -1) {
         close(runner->input_pipe[0]);
         close(runner->input_pipe[1]);
         close(runner->status_pipe[0]);
@@ -183,6 +183,13 @@ void runner_fini(RUNNER runner) {
     free(runner);
 }
 
+int runner_get_id(RUNNER runner) {
+    if (runner == NULL) {
+        return -1;
+    }
+    return runner->id;
+}
+
 char *runner_coverage_map(RUNNER runner) {
     if(runner == NULL) {
         return NULL;
@@ -243,9 +250,51 @@ char * runner_receive_fuzzer_input(RUNNER runner) {
         return NULL;
     }
 
-    // read length of input from main + error handle
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(runner->input_pipe[0], &read_fds);
+
+    sigset_t sigmask, oldmask;
+    sigemptyset(&sigmask);
+    sigaddset(&sigmask, SIGTERM);
+    sigaddset(&sigmask, SIGINT);
+    sigaddset(&sigmask, SIGHUP);
+    sigaddset(&sigmask, SIGPIPE);
+
+    sigprocmask(SIG_BLOCK, &sigmask, &oldmask);
+
+    int ret = pselect(runner->input_pipe[0] + 1, &read_fds, NULL, NULL, NULL, &oldmask);
+    sigprocmask(SIG_SETMASK, &oldmask, NULL);
+
+    if(ret == -1) {
+        if(errno == EINTR) {
+            return NULL;
+        }
+        return NULL;
+    }
+    if(ret == 0 || !FD_ISSET(runner->input_pipe[0], &read_fds)) {
+        return NULL;
+    }
+
+    // read length of input from main 
     size_t len;
-    if(read(runner->input_pipe[0], &len, sizeof(len)) == -1) {
+    ssize_t bytes_read = read(runner->input_pipe[0], &len, sizeof(len));
+    if(bytes_read == -1) {
+        if(errno == EINTR) {
+            return NULL;
+        }
+        return NULL;
+    }
+    if(bytes_read == 0) {
+        // Pipe closed
+        return NULL;
+    }
+    if(bytes_read != sizeof(len)) {
+        // Incomplete read
+        return NULL;
+    }
+
+    if(len > 1024 * 1024) {  // Max 1MB input size
         return NULL;
     }
 
@@ -256,9 +305,23 @@ char * runner_receive_fuzzer_input(RUNNER runner) {
     }
 
     // read input string + add null at end
-    if(read(runner->input_pipe[0], input_buffer, len) == -1) {
-        free(input_buffer);
-        return NULL;
+    size_t total_read = 0;
+    while(total_read < len) {
+        bytes_read = read(runner->input_pipe[0], input_buffer + total_read, len - total_read);
+        if(bytes_read == -1) {
+            if(errno == EINTR) {
+                free(input_buffer);
+                return NULL;
+            }
+            free(input_buffer);
+            return NULL;
+        }
+        if(bytes_read == 0) {
+            // Premature EOF
+            free(input_buffer);
+            return NULL;
+        }
+        total_read += bytes_read;
     }
     input_buffer[len] = '\0';
 
@@ -371,6 +434,15 @@ int runner_launch(RUNNER runner) {
         signal(SIGINT, terminate_handler);         
         signal(SIGHUP, terminate_handler);
 
+        // block signals during critical sections
+        sigset_t mask, oldmask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGCHLD);
+        sigaddset(&mask, SIGALRM);
+        sigaddset(&mask, SIGTERM);
+        sigaddset(&mask, SIGINT);
+        sigaddset(&mask, SIGHUP);
+
         // close pipes not used by runner -> only reads from input_pipe[0], write to status_pipe[1]
         // close input_pipe[1], status_pipe[0]
         close(runner->input_pipe[1]);
@@ -387,7 +459,6 @@ int runner_launch(RUNNER runner) {
             // read input -> fail 
             char *input_buffer = runner_receive_fuzzer_input(runner);
             if (input_buffer == NULL) {
-                /* Read failed - likely due to signal or main process closed pipe */
                 if (runner_terminate) {
                     break;
                 }
@@ -411,14 +482,19 @@ int runner_launch(RUNNER runner) {
                 if (dev_null_fd != -1) {
                     dup2(dev_null_fd, STDOUT_FILENO);
                     dup2(dev_null_fd, STDIN_FILENO);
+                    dup2(dev_null_fd, STDERR_FILENO);
                     close(dev_null_fd);
                 }
                 
                 // close pipes that are no longer needed
                 close(runner->input_pipe[0]);
                 close(runner->status_pipe[1]);
+                close(runner->shm_fd);
                 
                 //build argument vector with @@ replaced by input
+                extern char **args;
+                extern size_t program_argc;
+
                 char **argv = malloc(sizeof(char*) * (program_argc + 1));
                 if (argv == NULL) {
                     free(input_buffer);
@@ -428,10 +504,9 @@ int runner_launch(RUNNER runner) {
                 size_t argc = 0;
                 for (size_t i = 0; i < program_argc; i++) {
                     if (strcmp(args[i], PROGRAM_ARGUMENT_PLACEHOLDER) == 0) {
-                        /* Replace @@ with input string */
+                        // replace @@ with input string
                         argv[argc++] = input_buffer;
                     } else {
-                        /* Keep other arguments as-is */
                         argv[argc++] = args[i];
                     }
                 }
@@ -451,15 +526,22 @@ int runner_launch(RUNNER runner) {
             } else {
                 // for parent of target process
                 free(input_buffer);
+
+                // block signals before setting alarm
+                sigprocmask(SIG_BLOCK, &mask, &oldmask);
         
                 // set alarm to enforce timeout -> SIGALRM sgignal sent if run out of time
+                int timeout = 5;
                 alarm(timeout);
                 
-                // wait for child to exit/timeout -> suspend process until signal received using pause()
+                // wait for child to exit/timeout -> use sigsuspend()
                 int child_status = 0;
                 while (!sigchld_received && !sigalrm_received && !runner_terminate) {
-                    pause();
+                    sigsuspend(&oldmask);
                 }
+                // cancel alarm + restore signal mask
+                alarm(0);
+                sigprocmask(SIG_SETMASK, &oldmask, NULL);
                 
                 // timeout occurred -> kill target + send TIMEOUT status back to main fuzzer
                 if (sigalrm_received) {
@@ -510,7 +592,6 @@ struct runners {
     RUNNER *done_queue;
     int done_count;
     int capacity;
-    char **program;
 };
 
 RUNNERS runners_init(int job_count) {
@@ -525,7 +606,6 @@ RUNNERS runners_init(int job_count) {
     runners->ready_count = 0;
     runners->active_count = 0;
     runners->done_count = 0;
-    runners->program = NULL;
 
     // allocate memory for each queue + check for memory leak for each
     runners->ready_queue = malloc(sizeof(RUNNER) * job_count);
@@ -679,11 +759,11 @@ void runners_check_if_jobs_done(RUNNERS runners) {
         RUNNER runner = runners->active_queue[i];
         RUNNER_STATE state = fuzzer_attempt_receive_status(runner, NULL);
 
-        // if runner is complete, move to ready queue
+        // if runner is complete, move to ready queue -> should this not move to done queue?
         if(state != NO_STATE) {
             memmove(&runners->active_queue[i], &runners->active_queue[i+1], sizeof(RUNNER)*(runners->active_count-i-1));
             runners->active_count--;
-            runners->ready_queue[runners->ready_count++] = runner;
+            runners->done_queue[runners->done_count++] = runner;
         } else{
             i++;
         }
@@ -693,13 +773,13 @@ void runners_check_if_jobs_done(RUNNERS runners) {
 RUNNER runners_process_result(RUNNERS runners, RUNNER_STATE *state, int *data) {
     // invalid
     if(runners == NULL || runners->done_count == 0) {
-        return 0;
+        return NULL;
     }
 
     // selects a runner in the done queue and remove it from done queue
     // returns any information the exit status of the target program given the input assigned to the runner
     RUNNER runner = runners->done_queue[0];
-    memmove(&runners->done_queue[0], &runners->done_queue[1], sizeof(RUNNERS)*(runners->done_count-1));
+    memmove(&runners->done_queue[0], &runners->done_queue[1], sizeof(RUNNER)*(runners->done_count-1));
     runners->done_count--;
 
     // get information on exit status + add it to the ready queue.
@@ -717,10 +797,13 @@ int runners_reap(RUNNERS runners) {
 
     // attempt to reap any terminated runner processes and remove said runner from the queue it currently is in
     //      Then, the function will call runner_fini on the runner
-    pid_t pid = 0;
+    int reaped = 0;
+    pid_t pid;
     // if there is dead children, search for dead runner in each queue
     // if none, returns immediately
-    while((pid == waitpid(-1, NULL, WNOHANG)) > 0) {
+    while((pid = waitpid(-1, NULL, WNOHANG)) > 0) {
+        int found = 0;
+
         // check ready queue
         for(int i=0; i<runners->ready_count; i++) {
             if(runners->ready_queue[i]->runner_pid == pid) {
@@ -729,8 +812,14 @@ int runners_reap(RUNNERS runners) {
                 runners->ready_count--;
                 
                 runner_fini(runner);
-                return 0;
+                found = 1;
+                reaped++;
+                break;
             }
+        }
+
+        if(found) {
+            continue;
         }
 
         // check active queue
@@ -741,8 +830,14 @@ int runners_reap(RUNNERS runners) {
                 runners->active_count--;
                 
                 runner_fini(runner);
-                return 0;
+                found = 1;
+                reaped++;
+                break;
             }
+        }
+
+        if(found) {
+            continue;
         }
 
         // check done queue
@@ -753,10 +848,11 @@ int runners_reap(RUNNERS runners) {
                 runners->done_count--;
                 
                 runner_fini(runner);
-                return 0;
+                reaped++;
+                break;
             }
         }
     }
 
-    return 0;
+    return reaped;
 }

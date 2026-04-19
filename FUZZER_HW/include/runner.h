@@ -58,6 +58,14 @@ RUNNER runner_init();
 void runner_fini(RUNNER runner);
 
 /*
+ * Gets the unique ID of a runner instance
+ * 
+ * @param runner    The runner instance
+ * @returns the runner's unique ID
+ */
+int runner_get_id(RUNNER runner);
+
+/*
  * Retrieves the address of the shared memory used for the coverage-feedback
  * data for a specific runner instance. The shared memory should be memory
  * mapped into the address space, so that it can be accessed like a buffer.
