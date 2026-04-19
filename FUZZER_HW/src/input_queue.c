@@ -167,7 +167,7 @@ INPUT dequeue_input(INPUT_QUEUE queue) {
     INPUT dequeue_input = NULL;
 
     // 9 high priority dequeues then 1 low priority queue -> repeat pattern
-    if(queue->dequeue_counter % 10 != 0) {
+    if(queue->dequeue_counter < 9) {
         // check for if queue head is available
         if(queue->high_priority.head != NULL) {
             // start from head of queue + save the head node's input to dequeue/return at end
@@ -194,8 +194,8 @@ INPUT dequeue_input(INPUT_QUEUE queue) {
                 queue->low_priority.tail = NULL;
             }
             free(current);
-            queue->dequeue_counter++;
         }
+        queue->dequeue_counter = 0;
     }
 
     // requeue the dequeued the input -> should differentiate between high/low queue?
