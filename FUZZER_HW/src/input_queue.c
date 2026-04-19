@@ -70,23 +70,90 @@ void input_queue_fini(INPUT_QUEUE queue) {
     free(queue);
 }
 
+static int input_in_queue(QUEUE *queue, INPUT input) {
+    if(queue == NULL || input == NULL) {
+        return 0;
+    }
+
+    const char *str = input_str(input);
+    size_t len = input_len(input);
+
+    QUEUE_NODE *current = queue->head;
+    while(current != NULL) {
+        QUEUE_NODE *next = current->next;
+
+        // iterate through queue, if already in queue -> return 1 
+        if(input_len(current->input) == len && strcmp(input_str(current->input), str) == 0) {
+            return 1;
+        }
+        
+        current = next;
+    }
+
+    // if not in queue, return 0
+    return 0;
+}
+
 void enqueue_high_prio_input(INPUT_QUEUE queue, INPUT input) {
+    // invalid 
     if(queue == NULL || input == NULL) {
         return;
     }
 
-    // bitmap determines if the coverage-feedback data obtained by some input has caused the program to take a new control-flow edge that has never been observed prior
-    // If so, the input is considered a high priority input.
+    // if input is already in a queue, return
+    if(input_in_queue(&queue->high_priority, input) || input_in_queue(&queue->low_priority, input)) {
+        free_input(input);
+        return;
+    }
+
+    // else, create new node to add to high priority queue
+    QUEUE_NODE *node = malloc(sizeof(QUEUE_NODE));
+    if(node == NULL) {
+        free_input(input);
+        return;
+    }
+    node->input = input;
+    node->next = NULL;
+
+    // if nothing in high priority, node becomes head
+    if(queue->high_priority.head == NULL) {
+        queue->high_priority.head = node;
+    // else, add to end of queue so link to current tail then make it the new tail
+    } else {
+        queue->high_priority.tail->next = node;
+    }
+    queue->high_priority.tail = node;
 }
 
 void enqueue_low_prio_input(INPUT_QUEUE queue, INPUT input) {
-    (void) queue;
-    (void) input;
+    // invalid 
+    if(queue == NULL || input == NULL) {
+        return;
+    }
 
-    // hashset determines if the coverage-feedback data represents a new path that has not been observed before. 
-    // If so, then the input is considered a low priority input.
+    // if input is already in a queue, return
+    if(input_in_queue(&queue->high_priority, input) || input_in_queue(&queue->low_priority, input)) {
+        free_input(input);
+        return;
+    }
 
-    // no priority = discard
+    // else, create new node to add to low priority queue
+    QUEUE_NODE *node = malloc(sizeof(QUEUE_NODE));
+    if(node == NULL) {
+        free_input(input);
+        return;
+    }
+    node->input = input;
+    node->next = NULL;
+
+    // if nothing in low priority, node becomes head
+    if(queue->low_priority.head == NULL) {
+        queue->low_priority.head = node;
+    // else, add to end of queue so link to current tail then make it the new tail
+    } else {
+        queue->low_priority.tail->next = node;
+    }
+    queue->low_priority.tail = node;
 }
 
 INPUT dequeue_input(INPUT_QUEUE queue) {
