@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/select.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
@@ -444,6 +445,17 @@ int runner_launch(RUNNER runner) {
         sigaddset(&mask, SIGINT);
         sigaddset(&mask, SIGHUP);
 
+        // child may fork with SIGCHLD or SIGUSR1 signals block -> make sure to have unblocked so runner can receive signals from child + main
+        sigset_t inherited_blocked;
+        sigemptyset(&inherited_blocked);
+        sigaddset(&inherited_blocked, SIGCHLD);
+        sigaddset(&inherited_blocked, SIGALRM);
+        sigaddset(&inherited_blocked, SIGTERM);
+        sigaddset(&inherited_blocked, SIGINT);
+        sigaddset(&inherited_blocked, SIGHUP);
+        sigaddset(&inherited_blocked, SIGUSR1);
+        sigprocmask(SIG_UNBLOCK, &inherited_blocked, NULL);
+
         // close pipes not used by runner -> only reads from input_pipe[0], write to status_pipe[1]
         // close input_pipe[1], status_pipe[0]
         close(runner->input_pipe[1]);
@@ -493,46 +505,39 @@ int runner_launch(RUNNER runner) {
                 close(runner->status_pipe[1]);
                 close(runner->shm_fd);
                 
-                //build argument vector with @@ replaced by input
-                /*
+                // include externs to use -> are globals defined in global.h
+                // cmd = target program, args = arguments to target program, program_argc = number of arguments passed in 
+                extern char *cmd;
                 extern char **args;
                 extern size_t program_argc;
 
-                char **argv = malloc(sizeof(char*) * (program_argc + 1));
+                // check to make sure necessary values are not null -> if are, fail since unable to continue
+                if (cmd == NULL || args == NULL) {
+                    free(input_buffer);
+                    exit(EXIT_FAILURE);
+                }
+
+                // determine the starting index for arguments
+                size_t start_index = 0;
+                if (program_argc > 0 && args[0] != NULL && strcmp(args[0], cmd) == 0) {
+                    start_index = 1;
+                }
+
+                // allocate memory
+                char **argv = malloc(sizeof(char*) * (program_argc + 2));
                 if (argv == NULL) {
                     free(input_buffer);
                     exit(EXIT_FAILURE);
                 }
-                
-                size_t argc = 0;
-                for (size_t i = 0; i < program_argc; i++) {
-                    if (strcmp(args[i], PROGRAM_ARGUMENT_PLACEHOLDER) == 0) {
-                        // replace @@ with input string
-                        argv[argc++] = input_buffer;
-                    } else {
-                        argv[argc++] = args[i];
-                    }
-                }
-                argv[argc] = NULL;
-                */
 
-                extern char **args;
-                extern size_t program_argc;
-                
-                // build argv
-                int argc_count = 0;
-                for (size_t i = 0; i < program_argc; i++) {
-                    argc_count++;
-                }
-                
-                char **argv = malloc(sizeof(char*) * (argc_count + 1));
-                if (argv == NULL) {
-                    free(input_buffer);
-                    exit(EXIT_FAILURE);
-                }
-                
+                // argv always starts with the target program path/name.
                 size_t argc = 0;
-                for (size_t i = 0; i < program_argc; i++) {
+                argv[argc++] = cmd;
+
+                // iterate through args starting from start_index
+                //      - if argument is PROGRAM_ARGUMENT_PLACEHOLDER, replace with input buffer
+                //      - else copy over argument
+                for (size_t i = start_index; i < program_argc && args[i] != NULL; i++) {
                     if (strcmp(args[i], PROGRAM_ARGUMENT_PLACEHOLDER) == 0) {
                         argv[argc++] = input_buffer;
                     } else {
@@ -557,7 +562,7 @@ int runner_launch(RUNNER runner) {
                 // block signals before setting alarm
                 sigprocmask(SIG_BLOCK, &mask, &oldmask);
         
-                // set alarm to enforce timeout -> SIGALRM sgignal sent if run out of time
+                // set alarm to enforce timeout using timeout extern (passed in) -> SIGALRM sgignal sent if run out of time
                 extern int timeout;
                 alarm(timeout);
                 
