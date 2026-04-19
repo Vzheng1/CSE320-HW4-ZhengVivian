@@ -118,8 +118,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    //int result = run_fuzzer(seed_fp, job_count, input_count, time_limit, args);
-    
+    run_fuzzer(seed_fp, job_count, input_count, time_limit, args);
     fclose(seed_fp);
     return EXIT_SUCCESS;
 }
