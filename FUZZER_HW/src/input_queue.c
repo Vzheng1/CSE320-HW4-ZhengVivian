@@ -104,14 +104,12 @@ void enqueue_high_prio_input(INPUT_QUEUE queue, INPUT input) {
 
     // if input is already in a queue, return
     if(input_in_queue(&queue->high_priority, input) || input_in_queue(&queue->low_priority, input)) {
-        free_input(input);
         return;
     }
 
     // else, create new node to add to high priority queue
     QUEUE_NODE *node = malloc(sizeof(QUEUE_NODE));
     if(node == NULL) {
-        free_input(input);
         return;
     }
     node->input = input;
@@ -135,14 +133,12 @@ void enqueue_low_prio_input(INPUT_QUEUE queue, INPUT input) {
 
     // if input is already in a queue, return
     if(input_in_queue(&queue->high_priority, input) || input_in_queue(&queue->low_priority, input)) {
-        free_input(input);
         return;
     }
 
     // else, create new node to add to low priority queue
     QUEUE_NODE *node = malloc(sizeof(QUEUE_NODE));
     if(node == NULL) {
-        free_input(input);
         return;
     }
     node->input = input;
@@ -165,44 +161,47 @@ INPUT dequeue_input(INPUT_QUEUE queue) {
     }
 
     INPUT dequeue_input = NULL;
+    int from_high_queue = 0;
 
-    // 9 high priority dequeues then 1 low priority queue -> repeat pattern
-    if(queue->dequeue_counter < 9) {
-        // check for if queue head is available
-        if(queue->high_priority.head != NULL) {
-            // start from head of queue + save the head node's input to dequeue/return at end
-            QUEUE_NODE *current = queue->high_priority.head;
-            dequeue_input = current->input;
+    // dequeue pattern -> 9 hihg priority then 1 low priority -> repeat
+    int dequeue_pattern = (queue->dequeue_counter < 9);
 
-            // move to next -> if at end queue, set tail to NULL also
-            queue->high_priority.head = current->next;
-            if(queue->high_priority.head == NULL) {
-                queue->high_priority.tail = NULL;
-            }
+    // get references to two queueus based on pattern
+    QUEUE *first = dequeue_pattern ? &queue->high_priority : &queue->low_priority;
+    QUEUE *second = dequeue_pattern ? &queue->low_priority : &queue->high_priority;
 
-            // free the dequeued node, increment dequeue counter to continue pattern
-            free(current);
-            queue->dequeue_counter++;
-        }
+    // try deqeue from first queue -> if empty, try second queue -> if both empty, return NULL
+    QUEUE *selected = NULL;
+    if(first->head != NULL) {
+        selected = first;
+    } else if(second->head != NULL) {
+        selected = second;
     } else {
-        if(queue->low_priority.head != NULL) {
-            QUEUE_NODE *current = queue->low_priority.head;
-            dequeue_input = current->input;
-
-            queue->low_priority.head = current->next;
-            if(queue->low_priority.head == NULL) {
-                queue->low_priority.tail = NULL;
-            }
-            free(current);
-        }
-        queue->dequeue_counter = 0;
+        return NULL;
     }
 
-    // requeue the dequeued the input -> should differentiate between high/low queue?
-    if(dequeue_input != NULL) {
+    // dequeue from selected queue -> save input to return + update head/tail + free the freed node
+    QUEUE_NODE *current = selected->head;
+    dequeue_input = current->input;
+    selected->head = current->next;
+    if(selected->head == NULL) {
+        selected->tail = NULL;
+    }
+    free(current);
+
+    // check if input is from high priority queue so know where to enqueue back into
+    from_high_queue = (selected == &queue->high_priority);
+
+    // increment counter after dequeue succeeds
+    queue->dequeue_counter = (queue->dequeue_counter + 1) % 10;
+
+    // enqueue the dequeue_input back into correct queue based on where it came from
+    if(from_high_queue) {
         enqueue_high_prio_input(queue, dequeue_input);
+    } else {
+        enqueue_low_prio_input(queue, dequeue_input);
     }
 
-    // return reference to the input
+    // return reference to input
     return dequeue_input;
 }
