@@ -11,11 +11,14 @@
 
 // helper method: calculates hash function H_{n,m}
 static uint64_t H_sequence(uint64_t n, uint64_t m, uint64_t S) {
+    if(n == 0) {
+        return 0;
+    }
     if(m==0) {
-        return S;
+        return S % n;
     }
     uint64_t previous = H_sequence(n, m-1, S);
-    return hash(previous % n);
+    return hash(previous % n) % n;
 }
 
 // strategy 1 -> fill with single character to length
@@ -29,7 +32,6 @@ static INPUT s1_fill_to_length(INPUT input, uint64_t K) {
         return make_input("");
     }
 
-    // target length is 2^K -> if greater than max input length set it to the max
     uint64_t target_len = 1ULL << K;
     if (target_len > MAX_INPUT_LENGTH) {
         target_len = MAX_INPUT_LENGTH;
