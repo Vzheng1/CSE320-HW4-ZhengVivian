@@ -32,7 +32,12 @@ static INPUT s1_fill_to_length(INPUT input, uint64_t K) {
         return make_input("");
     }
 
-    uint64_t target_len = 1ULL << K;
+    uint64_t target_len;
+    if(K >= 63) {
+        target_len = MAX_INPUT_LENGTH;
+    } else {
+        target_len = 1ULL << K;
+    }
     if (target_len > MAX_INPUT_LENGTH) {
         target_len = MAX_INPUT_LENGTH;
     }
