@@ -27,11 +27,6 @@ static INPUT s1_fill_to_length(INPUT input, uint64_t K) {
     size_t N = input_len(input);
     const char *str = input_str(input);
 
-    // if string length is 0, return empty string
-    if(N == 0){
-        return make_input("");
-    }
-
     uint64_t target_len;
     if(K >= 63) {
         target_len = MAX_INPUT_LENGTH;
@@ -49,11 +44,13 @@ static INPUT s1_fill_to_length(INPUT input, uint64_t K) {
     }
 
     // if target length is shorter than original -> truncate
-    if(target_len <= N) {
+    if(target_len <= N && N > 0) {
         strncpy(new_str, str, target_len);
     // if longer -> fill extra space with character 'a'
     } else {
-        strncpy(new_str, str, target_len);
+        if (N > 0) {
+            strncpy(new_str, str, N);
+        }
         memset(new_str + N, 'a', target_len - N);
     }
     new_str[target_len] = '\0';
