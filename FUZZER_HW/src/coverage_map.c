@@ -80,72 +80,89 @@ static unsigned long hash_data(const char *data, size_t len) {
     return hash % HASHSET_SIZE;
 }
 
+// helper method to mask for last byte of bitmap
+// COVERAGE_MAP_SIZE is in bits BUT bitmap is byte addressed 
+//  -> if bit count not divisible by 8, last byte has unused bits -> must be ignored
+static unsigned char last_byte_mask(size_t bit_count) {
+    size_t remainder = bit_count % 8;
+    if(remainder == 0) {
+        return 0xFF;
+    }
+
+    return (unsigned char)((1u << remainder) - 1u);
+}
+
 COVERAGE_PRIORITY coverage_map_add(COVERAGE_MAP map, char *cov_data) {
     // invalid inputs
     if(map == NULL || cov_data == NULL) {
         return COV_NO_PRIO;
     }
 
-    // check for HIGH priority FIRST
-    // bitmap ->each bit represents if its corresponding edge in the control flow graph (CFG) of the program has been reached by some program execution by the fuzzer
-    //      bitmap's value = logical-or of all the coverage-feedback data obtained by prior target program executions
-    // purpose -> determine if the coverage-feedback data obtained by some input has caused the program to take a new control-flow edge that has never been observed prior. 
-    //      if new edge taken -> input = HIGH priority
     size_t cov_len = map->bitmap_bytes;
     unsigned char *cov_bytes = (unsigned char *)cov_data;
 
-    int is_new_edge = 0;
-    for(size_t i=0; i< cov_len; i++) {
-        // for each byte in coverage data, calculate edges/bits that have NOT been taken before
-        //      bytes ON in cov and OFF in bitmap = new edges 
-        unsigned char new_bits = cov_bytes[i] & ~map->bitmap[i];
-
-        // if new bits are found, update bitmap with logical OR with new cov_data
-        if(new_bits != 0) {
-            is_new_edge = 1;
-            map->bitmap[i] |= cov_bytes[i];
-        }
-    }
-    // if has taken new edge, it is high priority -> RETURN
-    if(is_new_edge) {
-        return COV_HIGH_PRIO;
-    }
-
-    // if NOT high priority, check for LOW priority using hashset
-    // hashset holds coverage-feedback data.
-    //      goal = determine if the coverage-feedback data represents a new path that has not been observed before. 
-    //      -> new path observed = low priority input
-
-    // calculate hash of coverage data
+    // calculate hash of coverage data + get hash bucket 
+    // iterate through bucket to check if it exists in hashset -> if not, new path; else, nt new
     unsigned long hash = hash_data(cov_data, cov_len);
     HASH_NODE *current = map->hashset[hash];
+    int is_new_path = 1;
 
-    // look for matching path in the that hash bucket -> not found = new path
     while(current != NULL) {
-        // if matching path is found, this input is NO priority -> return
         if(current->len == cov_len && memcmp(current->data, cov_data, cov_len) == 0) {
-            return COV_NO_PRIO;
+            is_new_path = 0;
+            break;
         }
         current = current->next;
     }
 
-    // else, not found then has new path so add new node to hashset and return low priority
-    // if run into error in any case, return no priority (-1)
-    HASH_NODE *new_node = malloc(sizeof(HASH_NODE));
-    if(new_node == NULL) {
-        return COV_NO_PRIO;
+    int is_new_edge = 0;
+    unsigned char tail_mask = last_byte_mask(COVERAGE_MAP_SIZE);
+    for(size_t i=0; i< cov_len; i++) {
+        unsigned char cov = cov_bytes[i];
+        if(i == cov_len - 1) {
+            // clear unused bits so padding bits do NOT count as new edges -> ignore them
+            cov &= tail_mask;
+        }
+
+        // any bit set in the incoming coverage + NOT yet seen in bitmap = new bit 
+        // if new bit exists -> new edfe -> HIGH priority
+        unsigned char new_bits = cov & (unsigned char)~map->bitmap[i];
+
+        if(new_bits != 0) {
+            is_new_edge = 1;
+        }
+
+        // always add the coverage data into bitmap by doing logical OR to keep track
+        map->bitmap[i] |= cov;
     }
 
-    new_node->data = malloc(cov_len);
-    if(new_node->data == NULL) {
-        free(new_node);
-        return COV_NO_PRIO;
+    // if new path exists, add to hashset
+    if(is_new_path) {
+        HASH_NODE *new_node = malloc(sizeof(HASH_NODE));
+        if(new_node == NULL) {
+            return COV_NO_PRIO;
+        }
+
+        new_node->data = malloc(cov_len);
+        if(new_node->data == NULL) {
+            free(new_node);
+            return COV_NO_PRIO;
+        }
+
+        memcpy(new_node->data, cov_data, cov_len);
+        new_node->len = cov_len;
+        new_node->next = map->hashset[hash];
+        map->hashset[hash] = new_node;
     }
-
-    memcpy(new_node->data, cov_data, cov_len);
-    new_node->len = cov_len;
-    new_node->next = map->hashset[hash];
-    map->hashset[hash] = new_node;
-
-    return COV_LOW_PRIO;
+    
+    // return priority based on new edge/path
+    // new edge -> HIGH priority, new path -> LOW priority
+    // return NO priority if neither
+    if(is_new_edge) {
+        return COV_HIGH_PRIO;
+    }
+    if(is_new_path) {
+        return COV_LOW_PRIO;
+    }
+    return COV_NO_PRIO;
 }
