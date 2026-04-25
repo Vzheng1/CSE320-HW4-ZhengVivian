@@ -361,16 +361,12 @@ static INPUT s9_flip_bits(INPUT input, uint64_t L, int64_t K, uint64_t S) {
     // flip sequences of L bits at H_{8*N, i} (S) in range 1 to p, inclusive
     for (uint64_t i = 1; i <= p; i++) {
         uint64_t bit_pos = H_sequence(total_bits, i, S);
-        // do NOT flip bits outside the range of bit locations
-        if (bit_pos >= total_bits) {
-            continue;
-        }
         
-        uint64_t byte_idx = bit_pos / 8;
-        uint64_t bit_idx = bit_pos % 8;
-        
-        for (uint64_t j = 0; j < L && bit_idx + j < 8; j++) {
-            new_str[byte_idx] ^= (1 << (bit_idx + j));
+        for (uint64_t j = 0; j < L && bit_pos + j < total_bits; j++) {
+            uint64_t absolute_bit = bit_pos + j;
+            uint64_t byte_idx = absolute_bit / 8;
+            uint64_t bit_idx = absolute_bit % 8;
+            new_str[byte_idx] ^= (char)(1u << bit_idx);
         }
     }
     
