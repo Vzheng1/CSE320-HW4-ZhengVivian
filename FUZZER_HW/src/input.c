@@ -89,7 +89,7 @@ MUTATOR_STATE input_state_step(INPUT input) {
     }
 
     // save original state to return, then increment by one
-    MUTATOR_STATE original_state = input->state;
-    input->state++;
-    return original_state;
+    //MUTATOR_STATE original_state = input->state;
+    //input->state++;
+    return ++input->state;
 }
