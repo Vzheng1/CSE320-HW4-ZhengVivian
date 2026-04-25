@@ -77,10 +77,10 @@ MUTATOR_STATE input_set_state(INPUT input, MUTATOR_STATE state) {
     if(input == NULL) {
         return 0;
     }
-
-    // set mutator state of input to 'state'
+    // save original state to return, then set new state
+    MUTATOR_STATE original_state = input->state;
     input->state = state;
-    return input->state;
+    return original_state;
 }
 
 MUTATOR_STATE input_state_step(INPUT input) {
@@ -88,6 +88,8 @@ MUTATOR_STATE input_state_step(INPUT input) {
         return 0;
     }
 
-    // increment mutator state by one for input
-    return ++input->state;
+    // save original state to return, then increment by one
+    MUTATOR_STATE original_state = input->state;
+    input->state++;
+    return original_state;
 }
