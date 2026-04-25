@@ -35,6 +35,9 @@ struct runner {
     char *coverage_map;
     pid_t runner_pid;
     INPUT active_input;
+    int has_result;
+    RUNNER_STATE result_state;
+    int result_data;
 };
 
 RUNNER runner_init() {
@@ -49,6 +52,9 @@ RUNNER runner_init() {
     runner->runner_pid = -1;
     runner->active_input = NULL;
     runner->coverage_map = NULL;
+    runner->has_result = 0;
+    runner->result_state = NO_STATE;
+    runner->result_data = 0;
 
     // initialize pipes
     if(pipe(runner->input_pipe) == -1) {
@@ -789,10 +795,14 @@ void runners_check_if_jobs_done(RUNNERS runners) {
     int i =0;
     while(i < runners->active_count) {
         RUNNER runner = runners->active_queue[i];
-        RUNNER_STATE state = fuzzer_attempt_receive_status(runner, NULL);
+        int data = 0;
+        RUNNER_STATE state = fuzzer_attempt_receive_status(runner, &data);
 
         // if runner is complete, move to ready queue -> should this not move to done queue?
         if(state != NO_STATE) {
+            runner->has_result = 1;
+            runner->result_state = state;
+            runner->result_data = data;
             memmove(&runners->active_queue[i], &runners->active_queue[i+1], sizeof(RUNNER)*(runners->active_count-i-1));
             runners->active_count--;
             runners->done_queue[runners->done_count++] = runner;
@@ -814,8 +824,21 @@ RUNNER runners_process_result(RUNNERS runners, RUNNER_STATE *state, int *data) {
     memmove(&runners->done_queue[0], &runners->done_queue[1], sizeof(RUNNER)*(runners->done_count-1));
     runners->done_count--;
 
-    // get information on exit status + add it to the ready queue.
-    *state = fuzzer_attempt_receive_status(runner, data);
+    // get cached result if already gone when moved to done queue
+    if (runner->has_result) {
+        if (state != NULL) {
+            *state = runner->result_state;
+        }
+        if (data != NULL && runner->result_state != TIMEOUT) {
+            *data = runner->result_data;
+        }
+        runner->has_result = 0;
+    } else if (state != NULL) {
+        *state = fuzzer_attempt_receive_status(runner, data);
+    } else {
+        fuzzer_attempt_receive_status(runner, data);
+    }
+
     runners->ready_queue[runners->ready_count++] = runner;
 
     return runner;
