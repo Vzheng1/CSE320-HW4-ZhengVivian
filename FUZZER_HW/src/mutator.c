@@ -15,10 +15,10 @@ static uint64_t H_sequence(uint64_t n, uint64_t m, uint64_t S) {
         return 0;
     }
     if(m==0) {
-        return S % n;
+        return S;
     }
     uint64_t previous = H_sequence(n, m-1, S);
-    return hash(previous % n) % n;
+    return hash(previous) % n;
 }
 
 // strategy 1 -> fill with single character to length
@@ -35,6 +35,20 @@ static INPUT s1_fill_to_length(INPUT input, uint64_t K) {
     }
     if (target_len > MAX_INPUT_LENGTH) {
         target_len = MAX_INPUT_LENGTH;
+    }
+
+    // if input string is empty -> should expand string to target length + fill with 'a'
+    if(N == 0 && target_len > 0) {
+        char *new_str = malloc(target_len + 1);
+        if(new_str == NULL) {
+            return NULL;
+        }
+        memset(new_str, 'a', target_len);
+        new_str[target_len] = '\0';
+
+        INPUT result = make_input(new_str);
+        free(new_str);
+        return result;
     }
 
     // allocate memory
