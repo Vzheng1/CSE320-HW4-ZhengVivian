@@ -224,6 +224,9 @@ int fuzzer_send_runner_input(RUNNER runner, INPUT input) {
     const char *str = input_str(input);
     size_t len = input_len(input);
 
+    // log immediately before sending the input bytes to the runner
+    fzl_sending_input(runner->id, str, NULL);
+
     // send the length through input pipe -> so runner knows how much to read
     if(write(runner->input_pipe[1], &len, sizeof(len)) == -1) {
         return -1;
@@ -238,9 +241,6 @@ int fuzzer_send_runner_input(RUNNER runner, INPUT input) {
         free_input(runner->active_input);
     }
     runner->active_input = make_input(str);
-
-    // log for testing
-    fzl_sending_input(runner->id, str, NULL);
     return 0;
 }
 
@@ -342,6 +342,9 @@ int runner_alert_fuzzer(RUNNER runner, RUNNER_STATE state, int data) {
         return -1;
     }
 
+    // log immediately before sending the status bytes to the fuzzer
+    fzl_runner_sending_status(runner->id, state, data, NULL);
+
     // writes exit status to status pipe for main to access
     if(write(runner->status_pipe[1], &state, sizeof(state)) == -1) {
         return -1;
@@ -350,7 +353,6 @@ int runner_alert_fuzzer(RUNNER runner, RUNNER_STATE state, int data) {
     if(write(runner->status_pipe[1], &data, sizeof(data)) == -1) {
         return -1;
     }
-    fzl_runner_sending_status(runner->id, state, data, NULL);
 
     // send signal to main process (use kill) -> send SIGUSR1
     if(kill(getppid(), SIGUSR1) == -1) {
