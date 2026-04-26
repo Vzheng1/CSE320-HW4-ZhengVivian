@@ -471,7 +471,6 @@ int runner_launch(RUNNER runner) {
         if(dup2(runner->shm_fd, COVERAGE_MAP_FD) == -1) {
             exit(EXIT_FAILURE);
         }
-        fzl_runner_init(runner->id, NULL);
 
         // wait for input from main fuzzer -> blocks until main sends input/signal arrives
         while (!runner_terminate) {
