@@ -143,9 +143,6 @@ RUNNER runner_init() {
     /* initialize coverage map to all zeros since there is no coverage data yet */
     memset(runner->coverage_map, 0, bitmap_bytes);
     
-    /* log that runner was initialized) */
-    fzl_runner_init(runner->id, NULL);
-    
     return runner;
 }
 
@@ -186,7 +183,6 @@ void runner_fini(RUNNER runner) {
         free(runner->shm_name);
     }
 
-    fzl_runner_fini(runner->id, NULL);
     free(runner);
 }
 
@@ -471,6 +467,9 @@ int runner_launch(RUNNER runner) {
         if(dup2(runner->shm_fd, COVERAGE_MAP_FD) == -1) {
             exit(EXIT_FAILURE);
         }
+
+        // log for runner init
+        fzl_runner_init(runner->id, NULL);
 
         // wait for input from main fuzzer -> blocks until main sends input/signal arrives
         while (!runner_terminate) {
